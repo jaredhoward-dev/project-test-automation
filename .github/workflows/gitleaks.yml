@@ -18,8 +18,8 @@ name: gitleaks
 # has no such check, so this file works the same under a user or an org and
 # needs no secret. The CLI is the official release tarball, checked against
 # the sha256 below. Bump GITLEAKS_VERSION and GITLEAKS_SHA256 together, from
-# the release's gitleaks_<version>_checksums.txt, and keep the pre-commit
-# hook's rev (.pre-commit-config.yaml) close to it.
+# the release's gitleaks_<version>_checksums.txt. The local pre-commit hook
+# (.pre-commit-config.yaml) pins its own rev separately.
 #
 # Scope matches what the action scanned:
 #   - pull_request: the PR's own commits (base..head, first parent, no
