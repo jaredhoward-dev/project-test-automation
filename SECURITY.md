@@ -36,8 +36,9 @@ packages. The two areas worth the most scrutiny:
 
 ## Defensive scaffolding in this repo
 
-- **Secret scanning** — `.github/workflows/gitleaks.yml` scans every push, every
-  PR, and the full history weekly. `.pre-commit-config.yaml` runs the same scan
+- **Secret scanning** — `.github/workflows/secret-scan.yml` runs TruffleHog on
+  every push, every PR, and the full history weekly; a verified (live) or
+  unverifiable credential fails it. `.pre-commit-config.yaml` runs gitleaks
   locally before commit.
 - **Dependency review** — `.github/workflows/audit.yml` runs `pnpm audit` and
   `cargo audit` weekly and opens a tracking issue on findings.
