@@ -12,12 +12,27 @@ name: gitleaks
 #   - pnpm audit + cargo audit (workflows/audit.yml) — flag CVEs in
 #     dependencies, not committed secrets.
 #
-# What gitleaks adds: regex-matching against the entire working tree AND git
-# history, with a built-in rule set tuned for common token shapes (npm,
-# GitHub, AWS, generic API keys, etc.).
+# Runs the MIT-licensed gitleaks CLI directly, not gitleaks/gitleaks-action.
+# The action (v2+) is under a proprietary EULA and refuses to run in a repo
+# owned by a GitHub organization without a GITLEAKS_LICENSE secret; the CLI
+# has no such check, so this file works the same under a user or an org and
+# needs no secret. The CLI is the official release tarball, checked against
+# the sha256 below. Bump GITLEAKS_VERSION and GITLEAKS_SHA256 together, from
+# the release's gitleaks_<version>_checksums.txt, and keep the pre-commit
+# hook's rev (.pre-commit-config.yaml) close to it.
 #
-# False positives go in `.gitleaks.toml` at the repo root (not yet created —
-# add it on first false hit rather than pre-empt).
+# Scope matches what the action scanned:
+#   - pull_request: the PR's own commits (base..head, first parent, no
+#     merges), so main's history is not re-scanned on every PR.
+#   - push to main: the pushed range (before..after). If `before` is not in
+#     the clone (a force push) the whole history is scanned instead.
+#   - schedule / workflow_dispatch: the whole history.
+#
+# Config: the CLI reads `.gitleaks.toml` and `.gitleaksignore` from the repo
+# root, or a GITLEAKS_CONFIG env var if you set one on the job. A finding
+# fails the job; the job summary lists rule, file, line and the fingerprint
+# to put in `.gitleaksignore` for a reviewed false positive. Secrets are
+# redacted from the log and the summary.
 
 on:
   push:
@@ -26,12 +41,14 @@ on:
     branches: [main]
   schedule:
     # Weekly full-history sweep. The push / PR triggers above only
-    # diff against the base, so a secret that landed on a forgotten
+    # scan their own commits, so a secret that landed on a forgotten
     # branch and got merged via fast-forward could slip through.
     # 06:00 UTC Monday — same tide as audit.yml / security.yml / scorecard.yml.
     - cron: '0 6 * * 1'
+  # On-demand full-history sweep.
+  workflow_dispatch:
 
-permissions: read-all
+permissions: {}
 
 jobs:
   scan:
@@ -39,25 +56,90 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: read
-      # The action POSTs SARIF findings via the same security-events
-      # permission CodeQL uses — keeps the Security tab the single
-      # pane of glass.
-      security-events: write
-      # PR metadata for inline annotations.
-      pull-requests: read
+      contents: read # check out the history to scan
+    env:
+      GITLEAKS_VERSION: 8.30.1
+      GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb # gitleaks_8.30.1_linux_x64.tar.gz
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # `fetch-depth: 0` is required for the full-history scan
-          # on the scheduled run. Push/PR triggers ignore the depth
-          # because they have access to the base ref via the
-          # workflow event itself.
+          # Full history: the scheduled sweep scans all of it, and the
+          # PR / push ranges need both of their ends in the clone.
           fetch-depth: 0
+          persist-credentials: false
 
-      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+      - name: Install gitleaks (pinned release, sha256-verified)
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/gitleaks"
+          tarball="$dir/gitleaks.tar.gz"
+          mkdir -p "$dir"
+          curl -fsSL --retry 3 -o "$tarball" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  $tarball" | sha256sum -c -
+          tar -xzf "$tarball" -C "$dir" gitleaks
+          "$dir/gitleaks" version
+
+      # Exit codes: 0 clean, 2 leaks found, anything else a gitleaks error.
+      # Either non-zero fails the job, so a broken scan never reads as clean.
+      - name: Scan
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # GITLEAKS_LICENSE is intentionally unset — public-repo free
-          # tier covers everything we need.
-          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: 'false'
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.event.after }}
+        run: |
+          set -euo pipefail
+          log_opts=""
+          case "$EVENT" in
+            pull_request)
+              log_opts="--no-merges --first-parent ${PR_BASE}..${PR_HEAD}"
+              ;;
+            push)
+              if [[ "$PUSH_BEFORE" =~ ^0+$ ]] || ! git cat-file -e "${PUSH_BEFORE}^{commit}" 2>/dev/null; then
+                echo "Push base not in the clone; scanning the whole history."
+              else
+                log_opts="--no-merges --first-parent ${PUSH_BEFORE}..${PUSH_AFTER}"
+              fi
+              ;;
+          esac
+          args=(git --redact --verbose --no-banner --exit-code=2
+            --report-format=sarif --report-path="$RUNNER_TEMP/gitleaks.sarif")
+          if [ -n "$log_opts" ]; then
+            args+=("--log-opts=$log_opts")
+            echo "Scanning: git log $log_opts"
+          else
+            echo "Scanning: the whole history"
+          fi
+          "$RUNNER_TEMP/gitleaks/gitleaks" "${args[@]}" .
+
+      - name: Summarize findings
+        if: ${{ !cancelled() }}
+        env:
+          SARIF: ${{ runner.temp }}/gitleaks.sarif
+        run: |
+          set -euo pipefail
+          if [ ! -s "$SARIF" ]; then
+            echo "## gitleaks" >> "$GITHUB_STEP_SUMMARY"
+            echo "No report was written; see the Install and Scan steps." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json, os
+          results = json.load(open(os.environ["SARIF"]))["runs"][0].get("results") or []
+          print("## gitleaks")
+          if not results:
+              print("No leaks found.")
+              raise SystemExit
+          print(f"**{len(results)} finding(s).** Rotate any real secret first; a reviewed false")
+          print("positive goes in `.gitleaksignore` by its fingerprint.\n")
+          print("| Rule | File | Line | Commit | Fingerprint |")
+          print("| --- | --- | --- | --- | --- |")
+          for r in results:
+              loc = r["locations"][0]["physicalLocation"]
+              path = loc["artifactLocation"]["uri"]
+              line = loc["region"]["startLine"]
+              sha = (r.get("partialFingerprints") or {}).get("commitSha", "")
+              print(f"| `{r['ruleId']}` | `{path}` | {line} | `{sha[:12]}` | `{sha}:{path}:{r['ruleId']}:{line}` |")
+          PY
