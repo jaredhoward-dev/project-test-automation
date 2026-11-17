@@ -16,8 +16,8 @@
     "@bettertest/reporter": "workspace:*"
   },
   "devDependencies": {
-    "@sveltejs/adapter-auto": "^7.0.1",
-    "@sveltejs/kit": "^2.70.3",
+    "@sveltejs/adapter-auto": "^8.0.1",
+    "@sveltejs/kit": "^3.2.0",
     "@sveltejs/vite-plugin-svelte": "^7.3.1",
     "@types/node": "^26.6.6",
     "prettier-plugin-svelte": "^4.1.1",
@@ -26,5 +26,9 @@
     "typescript": "^6.0.2",
     "vite": "^8.3.8",
     "vitest": "^4.1.11"
+  },
+  "imports": {
+    "#lib": "./src/lib/index.js",
+    "#lib/*": "./src/lib/*"
   }
 }
