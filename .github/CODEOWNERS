@@ -5,22 +5,22 @@
 # PR with no other matches still gets routed to the owner.
 
 # Catch-all — every file unless overridden below.
-*                                       @Absence0760
+*                                       @jaredhowardza
 
 # Build / release-impact paths
-/.github/workflows/                     @Absence0760
-/.github/dependabot.yml                 @Absence0760
-/.github/CODEOWNERS                     @Absence0760
+/.github/workflows/                     @jaredhowardza
+/.github/dependabot.yml                 @jaredhowardza
+/.github/CODEOWNERS                     @jaredhowardza
 
 # Security-sensitive scaffolding
-/SECURITY.md                            @Absence0760
-/.pre-commit-config.yaml                @Absence0760
+/SECURITY.md                            @jaredhowardza
+/.pre-commit-config.yaml                @jaredhowardza
 
 # Rust core — the execution, selector, and healing engines
-/crates/                                @Absence0760
+/crates/                                @jaredhowardza
 
 # Published npm packages
-/packages/                              @Absence0760
+/packages/                              @jaredhowardza
 
 # Claude tooling
-/CLAUDE.md                              @Absence0760
+/CLAUDE.md                              @jaredhowardza
