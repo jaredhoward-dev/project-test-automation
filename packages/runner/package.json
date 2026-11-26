@@ -25,11 +25,11 @@
     "@bettertest/bdd": "workspace:*",
     "@bettertest/reporter": "workspace:*",
     "@bettertest/selectors": "workspace:*",
-    "puppeteer-core": "^25.17.0"
+    "puppeteer-core": "^25.18.1"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
     "typescript": "^7.0.2",
-    "vitest": "^5.1.0"
+    "vitest": "^5.1.1"
   }
 }
